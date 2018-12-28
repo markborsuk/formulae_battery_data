@@ -58,17 +58,21 @@ for j in range(len(files_to_import)):
 
     # Load session into ATLAS
     try:
+        print('Opening ' + str(files_to_import[j]) + ' into ATLAS')
         pySession.load_session(nlayer=1, sessionpath=files_to_import[j], show_slow_row=True)
     except:
         print("Could not load: " + str(files_to_import[j]) + "\n"
             "Check if this file exists. \n"
             "Do you have the correct consortium License: \"Atieva Battery\"?")
 
-    # Initialise DataFrame
-    df_final = pd.DataFrame()
 
     # For each of the parameters selected (to become Influx fields)
     for i in range(len(params_to_import)):
+
+        # Initialise DataFrame
+        df_final = pd.DataFrame()
+
+
 
         try:
             # Get timeseries of that parameter from ATLAS
@@ -99,25 +103,25 @@ for j in range(len(files_to_import)):
             tStart = param_temp[2][0]
             tEnd = param_temp[2][-1]
             nStep = 1/fMaster
-            # Linearly spaced time vector of nanosecondns into day
-            tSeries = np.linspace(tStart, tEnd, lenMaster)
+        # Linearly spaced time vector of nanosecondns into day
+        tSeries = np.linspace(tStart, tEnd, lenMaster)
 
-            # Get date of session from session data
-            try:
-                tDateSortable = PythonParamObj(pySession, r'tMCOREDSortableDate:MCORED').getStartVal()
+        # Get date of session from session data
+        try:
+            tDateSortable = PythonParamObj(pySession, r'tMCOREDSortableDate:MCORED').getStartVal()
 
-            except:
-                print('Could not find date parameter in that session, will not be ingested')
+        except:
+            print('Could not find date parameter in that session, will not be ingested')
 
-            # Convert sortable date of format YYMMDD into unix epoch time in nanoseconds
-            dateUnix = time.mktime(datetime.datetime.strptime(str(int(tDateSortable)), "%y%m%d").timetuple())*1e9
-            # Combine nanoseconds into day with unix time for that day
-            tSeries = tSeries + dateUnix
+        # Convert sortable date of format YYMMDD into unix epoch time in nanoseconds
+        dateUnix = time.mktime(datetime.datetime.strptime(str(int(tDateSortable)), "%y%m%d").timetuple())*1e9
+        # Combine nanoseconds into day with unix time for that day
+        tSeries = tSeries + dateUnix
 
-            # Initiate DataFrame with the time vector, converting back to date-time
-            # === NOTE: Datetime will be UTC
-            df_final = pd.DataFrame(tSeries, columns=["Time"])
-            df_final = pd.DataFrame(pd.to_datetime(df_final['Time'], unit='ns'))
+        # Initiate DataFrame with the time vector, converting back to date-time
+        # === NOTE: Datetime will be UTC
+        df_final = pd.DataFrame(tSeries, columns=["Time"])
+        df_final = pd.DataFrame(pd.to_datetime(df_final['Time'], unit='ns'))
 
         # Force all subsequent parameter series to be of the same length
         if len(param_temp_series) > lenMaster:
@@ -133,23 +137,24 @@ for j in range(len(files_to_import)):
         # Add this parameter to the DataFrame
         df_final[str(params_to_import[i])] = pd.Series(param_temp_series)
 
-    # Set the index of the DataFrame to be the time column
-    df_final = df_final.set_index('Time')
+        # === Implement as a loop in the future
+        # Extracts tags
+        NBatterySerial = PythonParamObj(pySession, tags_to_import[0]).getStartVal()
+        NBMSSwMicro = PythonParamObj(pySession, tags_to_import[1]).getStartVal()
 
-    # === Implement as a loop in the future
-    # Extracts tags
-    NBatterySerial = PythonParamObj(pySession, tags_to_import[0]).getStartVal()
-    NBMSSwMicro = PythonParamObj(pySession, tags_to_import[1]).getStartVal()
+        # ==== Force for now, but need conversion function from RESSDatabase project
+        sTeamID = "AUD"
 
-    # ==== Force for now, but need conversion function from RESSDatabase project
-    sTeamID = "AUD"
+        df_final[str(tags_to_import[0])] = NBatterySerial
+        df_final[str(tags_to_import[1])] = NBMSSwMicro
+        df_final['sTeamID'] = sTeamID
 
-    df_final[str(tags_to_import[0])] = NBatterySerial
-    df_final[str(tags_to_import[1])] = NBMSSwMicro
-    df_final['sTeamID'] = sTeamID
+        # Set the index of the DataFrame to be the time column
+        df_final = df_final.set_index('Time')
 
-    # Write to influxDB
-    try:
-        client.write_points(dataframe=df_final, measurement=influx_measurement,tag_columns=tags_to_import)
-    except:
-        print('Failed to write to influxDB')
+        # Write to influxDB
+        try:
+            print('Writing ' + str(params_to_import[i]) + ' to InfluxDB')
+            client.write_points(dataframe=df_final, measurement=influx_measurement,tag_columns=tags_to_import)
+        except:
+            print('Failed to write to influxDB')
